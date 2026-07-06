@@ -1,0 +1,9 @@
+[Unit]
+Description=Tarjetazo - procesa resumen BNA y manda Telegram
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/tarjetazo
+ExecStart=/opt/tarjetazo/run.sh
+User=tarjetazo
