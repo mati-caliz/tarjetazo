@@ -1,0 +1,10 @@
+[Unit]
+Description=Corre tarjetazo cada 6 horas
+
+[Timer]
+OnCalendar=*-*-* 0,6,12,18:00:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
