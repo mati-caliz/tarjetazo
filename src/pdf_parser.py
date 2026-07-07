@@ -64,14 +64,28 @@ def extraer_movimientos(pdf_bytes: bytes, password: str) -> list[Movimiento]:
     return movimientos
 
 
-def extraer_periodo(pdf_bytes: bytes, password: str) -> str:
-    """Devuelve el identificador de cierre (ej. '11 Jun 26') para deduplicar resúmenes."""
+def _pagina1_texto(pdf_bytes: bytes, password: str) -> str:
     with pikepdf.open(BytesIO(pdf_bytes), password=password) as decrypted:
         buf = BytesIO()
         decrypted.save(buf)
         buf.seek(0)
 
     with pdfplumber.open(buf) as pdf:
-        text = pdf.pages[0].extract_text() or ""
+        return pdf.pages[0].extract_text() or ""
+
+
+def extraer_periodo(pdf_bytes: bytes, password: str) -> str:
+    """Devuelve el identificador de cierre (ej. '11 Jun 26') para deduplicar resúmenes."""
+    text = _pagina1_texto(pdf_bytes, password)
     m = re.search(r"CIERRE ACTUAL:\s*(\d{2} \w{3} \d{2})", text)
     return m.group(1) if m else "desconocido"
+
+
+def extraer_saldo_actual(pdf_bytes: bytes, password: str) -> tuple[float, float]:
+    """Devuelve (saldo_pesos, saldo_dolar) tal como figuran en 'SALDO ACTUAL' del resumen,
+    para validar que la suma de los movimientos parseados coincide con lo que dice el PDF."""
+    text = _pagina1_texto(pdf_bytes, password)
+    m = re.search(r"SALDO ACTUAL\s+(-?[\d.]+,\d{2})\s+(-?[\d.]+,\d{2})", text)
+    if not m:
+        raise ValueError("No se encontró 'SALDO ACTUAL' en el resumen; formato inesperado.")
+    return _parse_monto(m.group(1)), _parse_monto(m.group(2))
