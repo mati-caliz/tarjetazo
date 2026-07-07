@@ -17,8 +17,13 @@ def _extraer_pdf(msg: Message) -> bytes | None:
     return None
 
 
-def buscar_ultimo_resumen_no_leido() -> tuple[bytes, str] | None:
-    """Devuelve (pdf_bytes, message_id) del resumen de BNA no leído más reciente, o None."""
+def buscar_ultimo_resumen_no_leido() -> tuple[bytes, str, str] | None:
+    """Devuelve (pdf_bytes, message_id, uid) del resumen de BNA no leído más reciente, o None.
+
+    A propósito NO marca el mail como leído acá: eso lo hace `marcar_como_leido`
+    una vez que el resto del pipeline (parseo, categorización, envío a Telegram)
+    terminó con éxito. Si se marcara acá y algo fallara después, el mail quedaría
+    leído sin que el resumen se haya llegado a mandar, y se perdería ese mes."""
     user = os.environ["EMAIL_USER"]
     password = os.environ["EMAIL_APP_PASSWORD"]
 
@@ -45,5 +50,14 @@ def buscar_ultimo_resumen_no_leido() -> tuple[bytes, str] | None:
         if not pdf_bytes:
             return None
 
-        imap.store(ultimo_id, "+FLAGS", "\\Seen")
-        return pdf_bytes, message_id
+        return pdf_bytes, message_id, ultimo_id.decode()
+
+
+def marcar_como_leido(uid: str) -> None:
+    user = os.environ["EMAIL_USER"]
+    password = os.environ["EMAIL_APP_PASSWORD"]
+
+    with imaplib.IMAP4_SSL(IMAP_HOST) as imap:
+        imap.login(user, password)
+        imap.select("INBOX")
+        imap.store(uid.encode(), "+FLAGS", "\\Seen")

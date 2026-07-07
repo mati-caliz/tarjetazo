@@ -15,8 +15,14 @@ EMOJI_CATEGORIA = {
 }
 
 
-def _money(n: float) -> str:
-    return f"${n:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+def _money(n: float, simbolo: str = "$") -> str:
+    return f"{simbolo}{n:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _monto_movimiento(m: Movimiento) -> str:
+    if m.dolar:
+        return _money(m.dolar, "U$S ")
+    return _money(m.pesos)
 
 
 def formatear_resumen(movimientos: list[Movimiento], info: dict[str, dict[str, str]], periodo: str) -> str:
@@ -25,7 +31,8 @@ def formatear_resumen(movimientos: list[Movimiento], info: dict[str, dict[str, s
         cat = info.get(m.detalle, {}).get("categoria", "Otros")
         por_categoria.setdefault(cat, []).append(m)
 
-    total = sum(m.pesos for m in movimientos)
+    total_pesos = sum(m.pesos for m in movimientos)
+    total_dolar = sum(m.dolar for m in movimientos)
 
     lineas = [f"💳 <b>Resumen tarjeta BNA — cierre {periodo}</b>", ""]
 
@@ -33,10 +40,12 @@ def formatear_resumen(movimientos: list[Movimiento], info: dict[str, dict[str, s
         subtotal = sum(m.pesos for m in movs)
         emoji = EMOJI_CATEGORIA.get(cat, "🔹")
         lineas.append(f"{emoji} <b>{cat}</b> — {_money(subtotal)}")
-        for m in sorted(movs, key=lambda m: -m.pesos):
+        for m in sorted(movs, key=lambda m: -(m.pesos or m.dolar)):
             nombre = info.get(m.detalle, {}).get("nombre", m.detalle.title())
-            lineas.append(f"   • {nombre}: {_money(m.pesos)}")
+            lineas.append(f"   • {nombre}: {_monto_movimiento(m)}")
         lineas.append("")
 
-    lineas.append(f"💰 <b>Total: {_money(total)}</b>")
+    lineas.append(f"💰 <b>Total: {_money(total_pesos)}</b>")
+    if total_dolar:
+        lineas.append(f"💵 <b>Total en dólares: {_money(total_dolar, 'U$S ')}</b>")
     return "\n".join(lineas)

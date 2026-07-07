@@ -78,10 +78,29 @@ def _prompt_investigacion(detalles: list[str]) -> str:
     )
 
 
+def _extraer_json(raw: str) -> str | None:
+    """Claude a veces rodea el JSON con prosa o fuentes ('Sources: ...'). Busca el
+    primer bloque {...} balanceado en vez de asumir que el texto es JSON puro."""
+    inicio = raw.find("{")
+    if inicio == -1:
+        return None
+    profundidad = 0
+    for i in range(inicio, len(raw)):
+        if raw[i] == "{":
+            profundidad += 1
+        elif raw[i] == "}":
+            profundidad -= 1
+            if profundidad == 0:
+                return raw[inicio : i + 1]
+    return None
+
+
 def _parsear_json_resultado(raw: str, detalles: list[str]) -> dict[str, dict[str, str]]:
-    raw = re.sub(r"^```(?:json)?|```$", "", raw.strip(), flags=re.MULTILINE).strip()
+    bloque = _extraer_json(raw)
+    if bloque is None:
+        return {}
     try:
-        data = json.loads(raw)
+        data = json.loads(bloque)
         return {
             d: {"nombre": data[d]["nombre"], "categoria": data[d]["categoria"]}
             for d in detalles
@@ -126,31 +145,43 @@ def investigar_con_claude_api(detalles: list[str]) -> dict[str, dict[str, str]]:
     return _parsear_json_resultado(resp.content[0].text, detalles)
 
 
-def categorizar_movimientos(detalles: list[str]) -> dict[str, dict[str, str]]:
-    """Devuelve dict detalle -> {"nombre": str, "categoria": str} para cada detalle dado."""
+def categorizar_movimientos(
+    detalles: list[str], conocidos: dict[str, dict[str, str]] | None = None
+) -> dict[str, dict[str, str]]:
+    """Devuelve dict detalle -> {"nombre": str, "categoria": str} para cada detalle dado.
+
+    `conocidos` es un cache opcional (detalle -> info) de comercios ya investigados en
+    corridas anteriores: si un detalle ya está ahí, no se vuelve a mandar a Claude. El
+    dict se muta in-place agregando los comercios nuevos que se investiguen en esta corrida,
+    para que el caller lo persista y sirva de cache la próxima vez."""
+    conocidos = conocidos if conocidos is not None else {}
     resultado: dict[str, dict[str, str]] = {}
     a_investigar: list[str] = []
 
     for detalle in detalles:
-        if necesita_investigacion(detalle):
+        if detalle in conocidos:
+            resultado[detalle] = conocidos[detalle]
+        elif necesita_investigacion(detalle):
             a_investigar.append(detalle)
         else:
             resultado[detalle] = {"nombre": detalle.title(), "categoria": categorizar_por_reglas(detalle)}
 
     investigados: dict[str, dict[str, str]] = {}
     if a_investigar:
-        if shutil.which("claude"):
-            investigados = investigar_con_claude_cli(a_investigar)
-        elif os.environ.get("ANTHROPIC_API_KEY"):
-            investigados = investigar_con_claude_api(a_investigar)
+        try:
+            if shutil.which("claude"):
+                investigados = investigar_con_claude_cli(a_investigar)
+            elif os.environ.get("ANTHROPIC_API_KEY"):
+                investigados = investigar_con_claude_api(a_investigar)
+        except (subprocess.TimeoutExpired, RuntimeError):
+            investigados = {}
 
     for detalle in a_investigar:
-        if detalle in investigados:
-            resultado[detalle] = investigados[detalle]
-        else:
-            resultado[detalle] = {
-                "nombre": _nombre_basico(detalle),
-                "categoria": categorizar_por_reglas(detalle) or "Otros",
-            }
+        info = investigados.get(detalle) or {
+            "nombre": _nombre_basico(detalle),
+            "categoria": categorizar_por_reglas(detalle) or "Otros",
+        }
+        resultado[detalle] = info
+        conocidos[detalle] = info
 
     return resultado
