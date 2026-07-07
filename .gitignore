@@ -5,3 +5,6 @@ __pycache__/
 data/ultimo_procesado.txt
 data/comercios_conocidos.json
 data/cron.log
+data/historico.json
+data/ultimo_exito.txt
+data/alerta_silencio_enviada.txt
