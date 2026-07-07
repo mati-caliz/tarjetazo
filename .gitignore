@@ -4,3 +4,4 @@ __pycache__/
 *.pyc
 data/ultimo_procesado.txt
 data/comercios_conocidos.json
+data/cron.log
