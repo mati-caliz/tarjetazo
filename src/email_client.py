@@ -1,11 +1,14 @@
-"""Busca en la casilla de Outlook/Hotmail el último resumen de BNA no procesado
-y devuelve el PDF adjunto."""
+"""Busca en la casilla (Gmail) el último resumen de BNA no procesado y devuelve el PDF.
+
+El mail original de BNA (NAVI@mailing.bna.com.ar) se reenvía/redirige desde Outlook a
+esta casilla de Gmail mediante una regla. Leemos vía IMAP con app password de Gmail
+(Outlook ya no acepta app passwords por IMAP desde sep-2024)."""
 import email
 import imaplib
 import os
 from email.message import Message
 
-IMAP_HOST = "outlook.office365.com"
+IMAP_HOST = os.environ.get("IMAP_HOST", "imap.gmail.com")
 REMITENTE_BNA = "NAVI@mailing.bna.com.ar"
 
 
@@ -31,7 +34,10 @@ def buscar_ultimo_resumen_no_leido() -> tuple[bytes, str, str] | None:
         imap.login(user, password)
         imap.select("INBOX")
 
-        status, data = imap.search(None, f'(UNSEEN FROM "{REMITENTE_BNA}")')
+        # TEXT matchea el remitente de BNA tanto si la regla de Outlook preserva el
+        # From (redirect) como si lo deja embebido en el cuerpo (forward). El PDF +
+        # la clave (DNI) actúan de segundo filtro aguas abajo.
+        status, data = imap.search(None, f'(UNSEEN TEXT "{REMITENTE_BNA}")')
         if status != "OK" or not data[0]:
             return None
 
