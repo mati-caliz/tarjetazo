@@ -22,7 +22,8 @@ un app password (Outlook dejó de aceptar app passwords por IMAP desde sep-2024)
 4. `formatter.py` arma un mensaje agrupado por categoría con subtotales, total, y la
    comparación contra el período anterior.
 5. `historico.py` guarda cada período procesado en `data/historico.json` para poder comparar.
-6. `telegram_bot.py` manda el mensaje a tu chat de Telegram.
+6. `telegram_bot.py` encola el mensaje en Respondi, espera la confirmación de entrega y
+   Respondi lo manda al chat mediante el canal Telegram de Tarjetazo.
 7. `main.py` orquesta todo: valida que el total calculado cuadre con el saldo del resumen
    (avisa si no), guarda el estado, y si hace mucho que no procesa un resumen nuevo manda
    una alerta de "silencio" por si el bot se rompió.
@@ -43,9 +44,10 @@ cp .env.example .env
   cuenta. Se genera en https://myaccount.google.com/apppasswords (requiere tener la
   verificación en 2 pasos activada).
 - **`PDF_PASSWORD`**: la clave del PDF del resumen BNA (tu DNI).
-- **`TELEGRAM_BOT_TOKEN`** y **`TELEGRAM_CHAT_ID`**: creá un bot con `@BotFather` en Telegram
-  (`/newbot`), mandale un mensaje al bot, y después corré
-  `curl "https://api.telegram.org/bot<TOKEN>/getUpdates"` para ver tu `chat_id` en la respuesta.
+- **`RESPONDI_API_URL`**, **`RESPONDI_API_KEY`** y **`RESPONDI_CHANNEL_ID`**: acceso de sólo
+  envío al canal Telegram de Tarjetazo en Respondi. En producción viven en
+  `.env.respondi`, separado de las credenciales de correo y del PDF.
+- **`TELEGRAM_CHAT_ID`**: chat privado al que Respondi entrega el resumen.
 - **`ANTHROPIC_API_KEY`** (opcional): de https://console.anthropic.com — si no la ponés,
   los comercios no reconocidos por las reglas van a la categoría "Otros".
 
