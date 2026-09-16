@@ -25,6 +25,16 @@ class PdfParserTest(unittest.TestCase):
         self.assertEqual(pdf_parser.extraer_periodo(b"pdf", "clave"), "10 Sep 26")
         self.assertEqual(pdf_parser.extraer_vencimiento(b"pdf", "clave"), "24 Sep 26")
 
+    @patch("pdf_parser._pagina1_texto")
+    def test_extrae_vencimiento_de_tabla(self, pagina1_texto) -> None:
+        pagina1_texto.return_value = (
+            "CIERRE ACTUAL: 10 Sep 26 LIQ N030\n"
+            "VENCIMIENTO SALDO $ SALDO U$S PAGO MIN. $ PAGO MIN. U$S\n"
+            "23 Sep 26 540.526,97 5,30 100.000,00 --"
+        )
+
+        self.assertEqual(pdf_parser.extraer_vencimiento(b"pdf", "clave"), "23 Sep 26")
+
 
 class CategorizeTest(unittest.TestCase):
     def test_reglas_corrigen_categorias_viejas_del_cache(self) -> None:

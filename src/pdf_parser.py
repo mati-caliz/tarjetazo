@@ -19,6 +19,7 @@ LINE_RE = re.compile(
 IGNORAR_DETALLE = re.compile(
     r"^(SU PAGO|TOTAL CONSUMOS|SALDO ACTUAL|SALDO ANTERIOR)", re.IGNORECASE
 )
+FECHA_RESUMEN_RE = r"(\d{2}\s+\S{3,4}\.?\s+\d{2})"
 
 
 @dataclass
@@ -77,15 +78,22 @@ def _pagina1_texto(pdf_bytes: bytes, password: str) -> str:
 def extraer_periodo(pdf_bytes: bytes, password: str) -> str:
     """Devuelve el identificador de cierre (ej. '11 Jun 26') para deduplicar resúmenes."""
     text = _pagina1_texto(pdf_bytes, password)
-    m = re.search(r"CIERRE ACTUAL:\s*(\d{2}\s+\S{3,4}\.?\s+\d{2})", text, re.IGNORECASE)
+    m = re.search(rf"CIERRE ACTUAL:\s*{FECHA_RESUMEN_RE}", text, re.IGNORECASE)
     return m.group(1) if m else "desconocido"
 
 
 def extraer_vencimiento(pdf_bytes: bytes, password: str) -> str:
     """Devuelve la fecha límite de pago que figura como vencimiento actual."""
     text = _pagina1_texto(pdf_bytes, password)
-    m = re.search(r"VENCIMIENTO ACTUAL:\s*(\d{2}\s+\S{3,4}\.?\s+\d{2})", text, re.IGNORECASE)
-    return m.group(1) if m else "desconocido"
+    patrones = [
+        rf"VENCIMIENTO ACTUAL:\s*{FECHA_RESUMEN_RE}",
+        rf"^VENCIMIENTO[^\n]*\n\s*{FECHA_RESUMEN_RE}",
+    ]
+    for patron in patrones:
+        m = re.search(patron, text, re.IGNORECASE | re.MULTILINE)
+        if m:
+            return m.group(1)
+    return "desconocido"
 
 
 def extraer_saldo_actual(pdf_bytes: bytes, password: str) -> tuple[float, float]:
