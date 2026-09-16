@@ -11,6 +11,9 @@ EMOJI_CATEGORIA = {
     "Transporte": "🚕",
     "Indumentaria / Retail": "👕",
     "Entretenimiento": "🎉",
+    "IA / Herramientas digitales": "🧠",
+    "Tecnología / Electrónica": "💻",
+    "Impuestos / Intereses": "🏦",
     "Otros": "🔹",
 }
 
@@ -63,6 +66,7 @@ def formatear_resumen(
     movimientos: list[Movimiento],
     info: dict[str, dict[str, str]],
     periodo: str,
+    vencimiento: str,
     anterior: dict | None = None,
     advertencia: str | None = None,
 ) -> str:
@@ -75,7 +79,7 @@ def formatear_resumen(
     total_dolar = sum(m.dolar for m in movimientos)
     por_categoria_totales = {cat: sum(m.pesos for m in movs) for cat, movs in por_categoria.items()}
 
-    lineas = [f"💳 <b>Resumen tarjeta BNA — cierre {periodo}</b>", ""]
+    lineas = [f"💳 <b>Resumen tarjeta BNA — vence {vencimiento}</b>", f"Cierre: {periodo}", ""]
 
     if advertencia:
         lineas.append(f"⚠️ {advertencia}")

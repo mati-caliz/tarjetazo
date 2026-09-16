@@ -20,8 +20,8 @@ def _extraer_pdf(msg: Message) -> bytes | None:
     return None
 
 
-def buscar_ultimo_resumen_no_leido() -> tuple[bytes, str, str] | None:
-    """Devuelve (pdf_bytes, message_id, uid) del resumen de BNA no leído más reciente, o None.
+def buscar_ultimo_resumen(incluir_leidos: bool = False) -> tuple[bytes, str, str] | None:
+    """Devuelve (pdf_bytes, message_id, uid) del resumen de BNA más reciente, o None.
 
     A propósito NO marca el mail como leído acá: eso lo hace `marcar_como_leido`
     una vez que el resto del pipeline (parseo, categorización, envío a Telegram)
@@ -37,7 +37,8 @@ def buscar_ultimo_resumen_no_leido() -> tuple[bytes, str, str] | None:
         # TEXT matchea el remitente de BNA tanto si la regla de Outlook preserva el
         # From (redirect) como si lo deja embebido en el cuerpo (forward). El PDF +
         # la clave (DNI) actúan de segundo filtro aguas abajo.
-        status, data = imap.search(None, f'(UNSEEN TEXT "{REMITENTE_BNA}")')
+        estado = "" if incluir_leidos else "UNSEEN "
+        status, data = imap.search(None, f'({estado}TEXT "{REMITENTE_BNA}")')
         if status != "OK" or not data[0]:
             return None
 

@@ -1,5 +1,6 @@
 """Orquestador: revisa el mail, parsea el resumen de BNA, categoriza y manda Telegram.
 Pensado para correr periódicamente vía systemd timer / cron."""
+import argparse
 import json
 import logging
 import os
@@ -9,10 +10,10 @@ from datetime import datetime
 sys.path.insert(0, os.path.dirname(__file__))
 
 from categorize import categorizar_movimientos
-from email_client import buscar_ultimo_resumen_no_leido, marcar_como_leido
+from email_client import buscar_ultimo_resumen, marcar_como_leido
 from formatter import formatear_resumen
 from historico import cargar_historico, guardar_historico, periodo_anterior, registrar_periodo
-from pdf_parser import extraer_movimientos, extraer_periodo, extraer_saldo_actual
+from pdf_parser import extraer_movimientos, extraer_periodo, extraer_saldo_actual, extraer_vencimiento
 from telegram_bot import enviar_mensaje
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -83,11 +84,11 @@ def _chequear_silencio() -> None:
         open(ALERTA_SILENCIO_PATH, "w").close()
 
 
-def main() -> None:
+def main(reprocess_latest: bool = False) -> None:
     pdf_password = os.environ["PDF_PASSWORD"]
 
     log.info("Buscando resumen no leído de BNA...")
-    resultado = buscar_ultimo_resumen_no_leido()
+    resultado = buscar_ultimo_resumen(incluir_leidos=reprocess_latest)
     if resultado is None:
         log.info("No hay resumen nuevo. Nada que hacer.")
         _chequear_silencio()
@@ -95,7 +96,7 @@ def main() -> None:
 
     pdf_bytes, message_id, uid = resultado
 
-    if _ya_procesado(message_id):
+    if not reprocess_latest and _ya_procesado(message_id):
         log.info("Este resumen ya fue procesado antes. Nada que hacer.")
         marcar_como_leido(uid)
         return
@@ -103,6 +104,7 @@ def main() -> None:
     log.info("Parseando PDF...")
     movimientos = extraer_movimientos(pdf_bytes, pdf_password)
     periodo = extraer_periodo(pdf_bytes, pdf_password)
+    vencimiento = extraer_vencimiento(pdf_bytes, pdf_password)
 
     if not movimientos:
         log.warning("No se encontraron movimientos en el PDF. Revisar formato.")
@@ -125,10 +127,17 @@ def main() -> None:
     info = categorizar_movimientos(detalles, conocidos)
 
     historico = cargar_historico()
-    anterior = periodo_anterior(historico)
+    anterior = periodo_anterior(historico, periodo)
 
     log.info("Formateando y enviando mensaje...")
-    mensaje = formatear_resumen(movimientos, info, periodo, anterior=anterior, advertencia=advertencia)
+    mensaje = formatear_resumen(
+        movimientos,
+        info,
+        periodo,
+        vencimiento,
+        anterior=anterior,
+        advertencia=advertencia,
+    )
     enviar_mensaje(mensaje)
 
     # Solo se persiste el estado (comercios aprendidos, histórico, mail leído, resumen
@@ -150,4 +159,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--reprocess-latest", action="store_true")
+    args = parser.parse_args()
+    main(reprocess_latest=args.reprocess_latest)

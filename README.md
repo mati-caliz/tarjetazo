@@ -14,11 +14,11 @@ un app password (Outlook dejó de aceptar app passwords por IMAP desde sep-2024)
    `NAVI@mailing.bna.com.ar` con un PDF adjunto. El mail se marca como leído **solo**
    cuando todo el pipeline terminó bien, para no perder el resumen del mes si algo falla.
 2. `pdf_parser.py` desencripta el PDF (contraseña = tu DNI), extrae cada movimiento
-   (fecha, comercio, monto en pesos y dólares), el período y el saldo total.
+   (fecha, comercio, monto en pesos y dólares), el cierre, el vencimiento y el saldo total.
 3. `categorize.py` clasifica cada comercio por reglas de palabras clave; lo que no matchea
-   ninguna regla se manda a Claude (si `ANTHROPIC_API_KEY` está seteada) para nombrarlo y
-   categorizarlo. Los comercios ya investigados se cachean en `data/comercios_conocidos.json`
-   para no volver a consultarlos.
+   ninguna regla se manda a DeepSeek y, si falla, a Gemini para nombrarlo y categorizarlo.
+   Los comercios ya investigados se cachean en `data/comercios_conocidos.json` para no volver
+   a consultarlos.
 4. `formatter.py` arma un mensaje agrupado por categoría con subtotales, total, y la
    comparación contra el período anterior.
 5. `historico.py` guarda cada período procesado en `data/historico.json` para poder comparar.
@@ -48,8 +48,9 @@ cp .env.example .env
   envío al canal Telegram de Tarjetazo en Respondi. En producción viven en
   `.env.respondi`, separado de las credenciales de correo y del PDF.
 - **`TELEGRAM_CHAT_ID`**: chat privado al que Respondi entrega el resumen.
-- **`ANTHROPIC_API_KEY`** (opcional): de https://console.anthropic.com — si no la ponés,
-  los comercios no reconocidos por las reglas van a la categoría "Otros".
+- **`DEEPSEEK_API_KEY`** / **`GEMINI_API_KEY`** (opcionales): se usa DeepSeek como proveedor
+  principal y Gemini como respaldo. En este VPS, `run.sh` reutiliza esas variables desde
+  `../respondi/.env` si no están definidas localmente.
 
 ## Deploy en el VPS de Hetzner
 
@@ -80,6 +81,12 @@ sudo journalctl -u tarjetazo.service -f
 
 El timer corre cada 6 horas (0, 6, 12, 18hs) y no hace nada si no hay un mail nuevo de BNA sin
 leer o si ya fue procesado antes — así que es seguro dejarlo corriendo indefinidamente.
+
+Para volver a procesar y enviar el resumen más reciente aunque el mail ya esté leído:
+
+```bash
+./run.sh --reprocess-latest
+```
 
 ## Ajustar categorías
 

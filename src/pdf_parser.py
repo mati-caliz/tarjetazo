@@ -77,7 +77,14 @@ def _pagina1_texto(pdf_bytes: bytes, password: str) -> str:
 def extraer_periodo(pdf_bytes: bytes, password: str) -> str:
     """Devuelve el identificador de cierre (ej. '11 Jun 26') para deduplicar resúmenes."""
     text = _pagina1_texto(pdf_bytes, password)
-    m = re.search(r"CIERRE ACTUAL:\s*(\d{2} \w{3} \d{2})", text)
+    m = re.search(r"CIERRE ACTUAL:\s*(\d{2}\s+\S{3,4}\.?\s+\d{2})", text, re.IGNORECASE)
+    return m.group(1) if m else "desconocido"
+
+
+def extraer_vencimiento(pdf_bytes: bytes, password: str) -> str:
+    """Devuelve la fecha límite de pago que figura como vencimiento actual."""
+    text = _pagina1_texto(pdf_bytes, password)
+    m = re.search(r"VENCIMIENTO ACTUAL:\s*(\d{2}\s+\S{3,4}\.?\s+\d{2})", text, re.IGNORECASE)
     return m.group(1) if m else "desconocido"
 
 

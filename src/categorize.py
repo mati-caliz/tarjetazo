@@ -1,17 +1,17 @@
 """Clasifica cada movimiento en una categoría y le arma un nombre descriptivo:
-reglas por palabra clave primero, y Claude (con búsqueda web) como fallback para
-comercios que no matchean ninguna regla o que vienen con prefijo "MERPAGO*".
+reglas por palabra clave primero, y un modelo de IA como fallback para comercios
+que no matchean ninguna regla o que vienen con prefijo "MERPAGO*".
 
-Para el fallback con IA se prioriza el CLI de Claude Code (`claude -p` con la
-herramienta WebSearch habilitada), que si está logueado con una suscripción
-Pro/Max consume la cuota del plan en vez de facturar por token vía API. Si el
-CLI no está disponible, cae a la API con ANTHROPIC_API_KEY (sin búsqueda web).
-Si tampoco hay API key, se usa un nombre limpio básico sin investigar."""
+El fallback usa DeepSeek y, si falla, Gemini. Si no hay ninguna API configurada,
+se usa un nombre limpio básico sin investigar y no se cachea ese resultado."""
 import json
+import logging
 import os
 import re
-import shutil
-import subprocess
+
+import requests
+
+log = logging.getLogger("tarjetazo.categorize")
 
 CATEGORIAS = [
     "Supermercado / Almacén",
@@ -23,19 +23,30 @@ CATEGORIAS = [
     "Transporte",
     "Indumentaria / Retail",
     "Entretenimiento",
+    "IA / Herramientas digitales",
+    "Tecnología / Electrónica",
+    "Impuestos / Intereses",
     "Otros",
 ]
 
 # (patrón regex sobre el detalle en mayúsculas) -> categoría
 REGLAS: list[tuple[str, str]] = [
-    (r"MCDONALDS|BURGER|FRATELLI|HAVANNA|PICCOLO|BIMBI|CAFF[EÉ]|BAR\b", "Restaurantes / Bares"),
-    (r"TRADE SKY BAR|SOCIALCLUB", "Entretenimiento"),
+    (
+        r"MCDONALDS|BURGER|FRATELLI|HAVANNA|PICCOLO|BIMBI|CAFF?[EÉ]|CAFETERIA|"
+        r"BAR\b|BULLER|CREPAS|TOSTADO|DANDY|BRASILACAI|RAPANUI|SBUX|STARBUCKS",
+        "Restaurantes / Bares",
+    ),
+    (r"TRADE SKY BAR|SOCIALCLUB|PASSLINE|BIGBOX|CINEMA|MUNDOTICKET|EVENTOS?\b", "Entretenimiento"),
     (r"SHELL|YPF|AXION|PUMA ENERGY|GNC", "Combustible"),
     (r"WELLHUB|GYM|FITNESS", "Salud / Gimnasio"),
     (r"RAPPI|PEDIDOSYA|GLOVO", "Delivery / Apps de comida"),
-    (r"SUPERMERCADO|CARREFOUR|COTO|DIA %|EXPRESS \w+ \d", "Supermercado / Almacén"),
+    (r"SUPERMERCADO|CARREFOUR|COTO|DIA(?:\s+TIENDA|\s*%)|EXPRESS \w+ \d", "Supermercado / Almacén"),
     (r"NETFLIX|SPOTIFY|DISNEY|HBO|YOUTUBE|CLARO|PERSONAL|MOVISTAR|DIRECTV", "Servicios / Suscripciones"),
-    (r"UBER|CABIFY|SUBE|PEAJE|ESTACIONAMIENTO", "Transporte"),
+    (r"DEEPSEEK|OPENAI|CHATGPT|ANTHROPIC|CLAUDE|CURSOR|GITHUB|VERCEL", "IA / Herramientas digitales"),
+    (r"GAUSSONLINE|GAUSS\s+ONLINE", "Tecnología / Electrónica"),
+    (r"DB\.RG|IIBB\s+PERCEP|IVA\s+RG|INTERESES?\s+FINANCIACION", "Impuestos / Intereses"),
+    (r"UBER|CABIFY|SUBE|PEAJE|ESTACIONAMIENTO|ACARREO", "Transporte"),
+    (r"CENIDOR", "Indumentaria / Retail"),
 ]
 
 _COMPILED = [(re.compile(p, re.IGNORECASE), c) for p, c in REGLAS]
@@ -65,8 +76,8 @@ def _nombre_basico(detalle: str) -> str:
 def _prompt_investigacion(detalles: list[str]) -> str:
     return (
         "Estos son nombres de comercio de un resumen de tarjeta de crédito argentina "
-        "(varios cobran a través de Mercado Pago, con prefijo MERPAGO*). Buscá en la web "
-        "qué es cada uno (rubro, nombre real del negocio si lo encontrás) y asignale UNA "
+        "(varios cobran a través de Mercado Pago, con prefijo MERPAGO*). Identificá "
+        "qué es cada uno (rubro, nombre real del negocio si lo conocés) y asignale UNA "
         "categoría exacta de esta lista:\n"
         f"{', '.join(CATEGORIAS)}\n\n"
         "Comercios:\n" + "\n".join(f"- {d}" for d in detalles) + "\n\n"
@@ -101,48 +112,60 @@ def _parsear_json_resultado(raw: str, detalles: list[str]) -> dict[str, dict[str
         return {}
     try:
         data = json.loads(bloque)
-        return {
-            d: {"nombre": data[d]["nombre"], "categoria": data[d]["categoria"]}
-            for d in detalles
-            if d in data
-        }
+        resultado = {}
+        for detalle in detalles:
+            info = data.get(detalle)
+            if not isinstance(info, dict):
+                continue
+            nombre = info.get("nombre")
+            categoria = info.get("categoria")
+            if isinstance(nombre, str) and nombre.strip() and categoria in CATEGORIAS:
+                resultado[detalle] = {"nombre": nombre.strip(), "categoria": categoria}
+        return resultado
     except (json.JSONDecodeError, KeyError, TypeError):
         return {}
 
 
-def investigar_con_claude_cli(detalles: list[str]) -> dict[str, dict[str, str]]:
-    """Usa el CLI de Claude Code con WebSearch para identificar comercios y categorizarlos.
-    Si está logueado con una suscripción Pro/Max, consume la cuota del plan."""
+def _investigar_con_api_compatible(
+    detalles: list[str], base_url: str, api_key: str, model: str
+) -> dict[str, dict[str, str]]:
     if not detalles:
         return {}
 
-    prompt = _prompt_investigacion(detalles)
-    resultado = subprocess.run(
-        ["claude", "-p", prompt, "--allowedTools", "WebSearch", "--output-format", "text"],
-        capture_output=True,
-        text=True,
-        timeout=180,
+    response = requests.post(
+        f"{base_url.rstrip('/')}/chat/completions",
+        headers={"Authorization": f"Bearer {api_key}"},
+        json={
+            "model": model,
+            "messages": [{"role": "user", "content": _prompt_investigacion(detalles)}],
+            "response_format": {"type": "json_object"},
+            "temperature": 0,
+        },
+        timeout=60,
     )
-    if resultado.returncode != 0:
-        raise RuntimeError(f"claude CLI falló: {resultado.stderr.strip()}")
+    response.raise_for_status()
+    raw = response.json()["choices"][0]["message"]["content"]
+    return _parsear_json_resultado(raw, detalles)
 
-    return _parsear_json_resultado(resultado.stdout, detalles)
 
-
-def investigar_con_claude_api(detalles: list[str]) -> dict[str, dict[str, str]]:
-    """Pide a la API de Claude que categorice (sin búsqueda web). Requiere ANTHROPIC_API_KEY."""
-    if not detalles:
-        return {}
-
-    import anthropic
-
-    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-    resp = client.messages.create(
-        model="claude-sonnet-5",
-        max_tokens=2048,
-        messages=[{"role": "user", "content": _prompt_investigacion(detalles)}],
+def investigar_con_deepseek(detalles: list[str]) -> dict[str, dict[str, str]]:
+    return _investigar_con_api_compatible(
+        detalles,
+        os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+        os.environ["DEEPSEEK_API_KEY"],
+        os.environ.get("DEEPSEEK_MODEL", "deepseek-chat"),
     )
-    return _parsear_json_resultado(resp.content[0].text, detalles)
+
+
+def investigar_con_gemini(detalles: list[str]) -> dict[str, dict[str, str]]:
+    return _investigar_con_api_compatible(
+        detalles,
+        os.environ.get(
+            "GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai"
+        ),
+        os.environ["GEMINI_API_KEY"],
+        os.environ.get("GEMINI_MODEL", "gemini-3.6-flash"),
+    )
 
 
 def categorizar_movimientos(
@@ -159,29 +182,56 @@ def categorizar_movimientos(
     a_investigar: list[str] = []
 
     for detalle in detalles:
+        categoria_regla = categorizar_por_reglas(detalle)
         if detalle in conocidos:
-            resultado[detalle] = conocidos[detalle]
+            info = conocidos[detalle]
+            if categoria_regla is not None and info.get("categoria") != categoria_regla:
+                info = {**info, "categoria": categoria_regla, "origen": "regla"}
+                conocidos[detalle] = info
+                resultado[detalle] = info
+            elif info.get("categoria") == "Otros" and "origen" not in info:
+                conocidos.pop(detalle)
+                a_investigar.append(detalle)
+            else:
+                resultado[detalle] = info
         elif necesita_investigacion(detalle):
             a_investigar.append(detalle)
         else:
-            resultado[detalle] = {"nombre": detalle.title(), "categoria": categorizar_por_reglas(detalle)}
+            resultado[detalle] = {
+                "nombre": detalle.title(),
+                "categoria": categoria_regla,
+                "origen": "regla",
+            }
 
     investigados: dict[str, dict[str, str]] = {}
     if a_investigar:
-        try:
-            if shutil.which("claude"):
-                investigados = investigar_con_claude_cli(a_investigar)
-            elif os.environ.get("ANTHROPIC_API_KEY"):
-                investigados = investigar_con_claude_api(a_investigar)
-        except (subprocess.TimeoutExpired, RuntimeError):
-            investigados = {}
+        proveedores = []
+        if os.environ.get("DEEPSEEK_API_KEY"):
+            proveedores.append(investigar_con_deepseek)
+        if os.environ.get("GEMINI_API_KEY"):
+            proveedores.append(investigar_con_gemini)
+        for investigar in proveedores:
+            try:
+                investigados = investigar(a_investigar)
+                if investigados:
+                    break
+            except (requests.RequestException, KeyError, TypeError, ValueError) as error:
+                log.warning("Falló el proveedor %s: %s", investigar.__name__, error)
+                continue
 
     for detalle in a_investigar:
-        info = investigados.get(detalle) or {
+        investigado = investigados.get(detalle)
+        info = investigado or {
             "nombre": _nombre_basico(detalle),
             "categoria": categorizar_por_reglas(detalle) or "Otros",
         }
+        categoria_regla = categorizar_por_reglas(detalle)
+        if categoria_regla is not None:
+            info = {**info, "categoria": categoria_regla, "origen": "regla"}
+        elif investigado is not None:
+            info = {**info, "origen": "modelo"}
         resultado[detalle] = info
-        conocidos[detalle] = info
+        if categoria_regla is not None or investigado is not None:
+            conocidos[detalle] = info
 
     return resultado

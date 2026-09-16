@@ -19,9 +19,12 @@ def guardar_historico(historico: list[dict]) -> None:
         json.dump(historico, f, ensure_ascii=False, indent=2)
 
 
-def periodo_anterior(historico: list[dict]) -> dict | None:
-    """El último período registrado (llamar ANTES de agregar el período actual)."""
-    return historico[-1] if historico else None
+def periodo_anterior(historico: list[dict], periodo_actual: str | None = None) -> dict | None:
+    """Devuelve el último período distinto del actual, si se indicó uno."""
+    return next(
+        (periodo for periodo in reversed(historico) if periodo["periodo"] != periodo_actual),
+        None,
+    )
 
 
 def registrar_periodo(
